@@ -14,8 +14,8 @@ public class QuickSortVisualizer extends JFrame {
     private JButton startButton;
     private JButton resetButton;
     private JSlider speedSlider;
-    private boolean sorting = false;
-    private boolean paused = false;
+    private volatile boolean sorting = false;
+    private volatile boolean paused = false;
 
     public QuickSortVisualizer() {
         setTitle("Quick Sort Visualizer");
@@ -42,6 +42,7 @@ public class QuickSortVisualizer extends JFrame {
             public void actionPerformed(ActionEvent e) {
                 if (!sorting) {
                     sorting = true;
+                    paused = false;
                     startButton.setText("暫停");
                     resetButton.setEnabled(false);
                     new SortingThread().start();
@@ -79,7 +80,7 @@ public class QuickSortVisualizer extends JFrame {
     private void initializeArray() {
         Random random = new Random();
         for (int i = 0; i < array.length; i++) {
-            array[i] = random.nextInt(HEIGHT - 100) + 10;
+            array[i] = random.nextInt(HEIGHT - 150) + 10;
         }
     }
 
@@ -91,6 +92,12 @@ public class QuickSortVisualizer extends JFrame {
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
+
+            // 清除背景
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, getWidth(), getHeight());
+
+            // 繪製柱狀圖
             for (int i = 0; i < array.length; i++) {
                 if (i == pivotIndex) {
                     g.setColor(Color.RED);
@@ -101,31 +108,35 @@ public class QuickSortVisualizer extends JFrame {
                 } else {
                     g.setColor(Color.BLACK);
                 }
-                g.fillRect(i * BAR_WIDTH, HEIGHT - array[i] - 100, BAR_WIDTH - 1, array[i]);
+                g.fillRect(i * BAR_WIDTH, getHeight() - array[i], BAR_WIDTH - 1, array[i]);
             }
         }
 
-        public void setPivotIndex(int index) {
-            this.pivotIndex = index;
-        }
-
-        public void setCurrentI(int index) {
-            this.currentI = index;
-        }
-
-        public void setCurrentJ(int index) {
-            this.currentJ = index;
+        public void updateIndices(int pivot, int i, int j) {
+            this.pivotIndex = pivot;
+            this.currentI = i;
+            this.currentJ = j;
+            repaint();
         }
     }
 
     private class SortingThread extends Thread {
         @Override
         public void run() {
-            quickSort(0, array.length - 1);
-            sorting = false;
-            paused = false;
-            startButton.setText("開始排序");
-            resetButton.setEnabled(true);
+            try {
+                quickSort(0, array.length - 1);
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                // 確保在排序結束時重置UI
+                SwingUtilities.invokeLater(() -> {
+                    sorting = false;
+                    paused = false;
+                    startButton.setText("開始排序");
+                    resetButton.setEnabled(true);
+                    sortPanel.updateIndices(-1, -1, -1);
+                });
+            }
         }
 
         private void quickSort(int low, int high) {
@@ -137,50 +148,53 @@ public class QuickSortVisualizer extends JFrame {
         }
 
         private int partition(int low, int high) {
-            sortPanel.setPivotIndex(high);
             int pivot = array[high];
             int i = low - 1;
 
-            sortPanel.setCurrentI(i);
+            sortPanel.updateIndices(high, i, low);
+            delay();
 
             for (int j = low; j < high; j++) {
-                sortPanel.setCurrentJ(j);
+                sortPanel.updateIndices(high, i, j);
                 delay();
 
-                if (array[j] < pivot) {
+                if (array[j] <= pivot) {
                     i++;
-                    sortPanel.setCurrentI(i);
-                    delay();
-
                     swap(i, j);
+                    sortPanel.updateIndices(high, i, j);
+                    delay();
                 }
             }
 
             swap(i + 1, high);
-            sortPanel.setPivotIndex(-1);
-            sortPanel.setCurrentI(-1);
-            sortPanel.setCurrentJ(-1);
+            sortPanel.updateIndices(-1, i + 1, -1);
+            delay();
+
             return i + 1;
         }
 
         private void swap(int i, int j) {
-            int temp = array[i];
-            array[i] = array[j];
-            array[j] = temp;
-            sortPanel.repaint();
-            delay();
+            if (i != j) {
+                int temp = array[i];
+                array[i] = array[j];
+                array[j] = temp;
+                sortPanel.repaint();
+                delay();
+            }
         }
 
         private void delay() {
             try {
-                Thread.sleep(101 - speedSlider.getValue());
+                Thread.sleep(Math.max(5, 101 - speedSlider.getValue()));
                 if (paused) {
                     synchronized (sortPanel) {
-                        sortPanel.wait();
+                        while (paused) {
+                            sortPanel.wait();
+                        }
                     }
                 }
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                Thread.currentThread().interrupt();
             }
         }
     }
